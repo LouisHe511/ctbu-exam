@@ -1,0 +1,12 @@
+# 后端依赖（刻意保持极简，能跑起来的核心只有前两个）
+#
+# 没有 Web 框架：路由用标准库 http.server 手写，见 pay_service.py。
+# 这不是为了炫技，而是让部署只需要「Python + 一个 systemd 单元」，
+# 2C2G 的机器就能跑，也不用担心框架自身的漏洞升级。
+
+psycopg2-binary>=2.9,<3          # PostgreSQL 驱动（含连接池）
+cryptography>=42                 # RSA 签名 / AES-GCM 解密（微信支付 v3）
+
+# 可选：生成微信 Native 的支付二维码。
+# 缺失时后端不报错，前端退回到「显示 code_url 让用户复制」。
+qrcode[pil]>=7.4

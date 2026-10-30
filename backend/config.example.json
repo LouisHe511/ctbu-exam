@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "复制为 /etc/ctbu-pay/config.json 后填写真实值。",
+    "缺失的分段 = 该支付渠道关闭，其余功能照常工作（不会导致服务启动失败）。",
+    "私钥文件权限建议 600，属主与运行服务的用户一致。"
+  ],
+
+  "db": {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "ctbu",
+    "user": "ctbu",
+    "password": "CHANGE_ME"
+  },
+
+  "callback_secret": "CHANGE_ME_RANDOM_STRING",
+  "_callback_secret_note": "必须与数据库 app_secrets 表里 pay_callback_secret 的值一致",
+
+  "wechat": {
+    "appid": "wx0000000000000000",
+    "mchid": "1600000000",
+    "app_secret": "CHANGE_ME",
+    "api_v3_key": "CHANGE_ME_32_BYTES",
+    "merchant_serial": "CHANGE_ME_SERIAL_NO",
+    "merchant_key_path": "/etc/ctbu-pay/keys/apiclient_key.pem",
+    "notify_url": "https://your-domain.com/api/pay/notify/wechat"
+  },
+
+  "alipay": {
+    "app_id": "2021000000000000",
+    "app_private_key_path": "/etc/ctbu-pay/keys/alipay_app_private.pem",
+    "alipay_public_key_path": "/etc/ctbu-pay/keys/alipay_public.pem",
+    "notify_url": "https://your-domain.com/api/pay/notify/alipay",
+    "return_url": "https://your-domain.com/"
+  }
+}

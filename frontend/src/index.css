@@ -1,0 +1,371 @@
+/*
+ * 2026-10-17 阶段 5：去掉 Google Fonts 外链
+ * （国内经常被墙 → 首屏白白多一次失败请求；本站已全链路国内化，不留外链尾巴）
+ * 改用系统字体栈：苹方 / 微软雅黑 / 思源（若本机有）/ system-ui
+ *
+ * 2026-10-20：用户「ai感太重了」。方向改为**校档案馆 / 索引卡**——
+ * 发丝线分层、不做卡片盒子、中文衬线只给大标题、数字等宽。
+ * 具体判据见 tailwind.config.js 顶部注释。
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+
+  /*
+   * 移动端底部导航（Layout.tsx 的 `md:hidden fixed bottom-0` nav）的高度。
+   *
+   * 为什么要抽成变量：四六级页有**吸底听力播放器**，它也是 fixed bottom-0。
+   * 导航 z-50、播放器 z-40，两者都贴 bottom:0 → 导航会把播放器盖住
+   * （实测 iPhone 14：导航 65px、播放器 76px，播放器只露出约 11px，基本不可用）。
+   * 修法是把播放器抬到导航之上（`bottom-[var(--ctbu-mobile-nav-h)]`），
+   * 于是这个高度必须与导航真实高度**保持一致**，故锁定为同一个来源。
+   * 改导航内边距/内容时，记得同步这里。
+   */
+  --ctbu-mobile-nav-h: 56px;
+
+  /* 单一发丝线色：所有 border / 分隔线都取它，别处不要再写字面量灰 */
+  --ctbu-rule: #232629;
+  --ctbu-rule-strong: #3a3d40;
+
+  /*
+   * ═══════════════════════════════════════════════════════════
+   * 主题变量（2026-10-22 双主题）
+   * ═══════════════════════════════════════════════════════════
+   * 这里定义的是**深色**（默认）。浅色在下面 `[data-theme="light"]` 里
+   * 只覆盖需要变的那几个值。
+   *
+   * 为什么用变量而不是两套 className：
+   *   站内 500+ 处颜色类名，逐个加 `dark:` 前缀必然漏，而浅色下漏一处
+   *   就是白底白字。变量一换全站同帧生效，新组件自动跟随。
+   *
+   * 变量命名只描述用途，不描述颜色 —— 换主题时不用重新理解语义。
+   */
+  --ctbu-page: 8 9 10;  /* 页面底 */
+  --ctbu-panel: 16 17 18;  /* 卡片 / 面板 */
+  --ctbu-panel-2: 22 23 24;  /* 再上一层 / 悬停 */
+  --ctbu-solid: 247 248 248;  /* 实心强调块底（主按钮） */
+  --ctbu-solid-hover: 255 255 255;  /* 主按钮 hover：深色下更亮 */
+  --ctbu-on-solid: 8 9 10;  /* 实心块上的字 —— 永远与 solid 反色 */
+  --ctbu-strong: 247 248 248;  /* 主正文 */
+  --ctbu-muted: 138 143 152;  /* 次级正文 6.13:1 */
+  --ctbu-faint: 122 127 136;  /* 弱化说明 4.95:1 */
+  --ctbu-input: 0 0 0;  /* 表单控件底 */
+  /* 叠层：深色下"提亮"= 白色加一点透明度 */
+  --ctbu-elevate:     255 255 255;
+  --ctbu-hairline:    255 255 255;
+
+  --ctbu-gray-50: 11 12 13;
+  --ctbu-gray-100: 20 21 22;
+  --ctbu-gray-200: 35 38 41;
+  --ctbu-gray-300: 58 61 64;
+  --ctbu-gray-400: 122 127 136;
+  --ctbu-gray-500: 138 143 152;
+  --ctbu-gray-600: 154 160 169;
+  --ctbu-gray-700: 185 190 199;
+  --ctbu-gray-800: 223 226 230;
+  --ctbu-gray-900: 247 248 248;
+  --ctbu-gray-950: 8 9 10;
+
+  --ctbu-ink-950: 8 9 10;
+  --ctbu-ink-900: 12 13 14;
+  --ctbu-ink-850: 16 17 18;
+  --ctbu-ink-800: 22 23 24;
+  --ctbu-ink-750: 28 29 31;
+
+  --ctbu-accent: 20 184 166;
+  --ctbu-accent-deep: 13 148 136;
+  --ctbu-accent-wash: 13 36 32;
+}
+
+/*
+ * ═══════════════════════════════════════════════════════════
+ * 浅色主题
+ * ═══════════════════════════════════════════════════════════
+ * 校验过的对比度（底色 #fbfbfa）：
+ *   strong  #16181a  17.9:1 ✅   muted  #5f6672  6.6:1 ✅
+ *   faint   #6b7280  4.9:1 ✅
+ *
+ * 特意不用纯白底（#fff）：
+ *   1) 一整屏纯白对长时间看卷子很刺眼；
+ *   2) 纯白会让发丝线与卡片阴影全部"消失"，层次没了。
+ *   #fbfbfa 是一点点暖的纸白，和「档案馆」那个方向也对得上。
+ *
+ * 实心按钮在浅色下要**反过来**：底变深、字变白 —— 所以 solid/on-solid 一起换。
+ */
+[data-theme='light'] {
+  --ctbu-page: 251 251 250;
+  --ctbu-panel: 255 255 255;
+  --ctbu-panel-2: 244 244 242;
+  --ctbu-solid: 28 31 34;
+  --ctbu-solid-hover: 12 14 16;  /* 主按钮 hover：浅色下更深 */
+  --ctbu-on-solid: 255 255 255;
+  --ctbu-strong: 22 24 26;
+  --ctbu-muted: 95 102 114;
+  --ctbu-faint: 107 114 128;
+  --ctbu-input: 255 255 255;
+  /* 浅色下"叠层"要压暗而不是提亮，所以换成一整套深色 */
+  --ctbu-elevate:   17 19 21;
+  --ctbu-hairline:  17 19 21;
+
+  --ctbu-rule:        #e2e2df;
+  --ctbu-rule-strong: #cfcfcb;
+
+  --ctbu-gray-50: 247 247 245;
+  --ctbu-gray-100: 244 244 242;
+  --ctbu-gray-200: 231 231 228;
+  --ctbu-gray-300: 207 207 203;
+  --ctbu-gray-400: 163 168 176;
+  --ctbu-gray-500: 107 114 128;
+  --ctbu-gray-600: 95 102 114;
+  --ctbu-gray-700: 61 68 80;
+  --ctbu-gray-800: 35 39 44;
+  --ctbu-gray-900: 22 24 26;
+  --ctbu-gray-950: 251 251 250;
+
+  --ctbu-ink-950: 251 251 250;
+  --ctbu-ink-900: 244 244 242;
+  --ctbu-ink-850: 255 255 255;
+  --ctbu-ink-800: 240 240 238;
+  --ctbu-ink-750: 233 233 230;
+
+  /* 浅底上 #14b8a6 只有 2.4:1，必须压深 */
+  --ctbu-accent: 13 125 112;
+  --ctbu-accent-deep: 10 101 91;
+  --ctbu-accent-wash: 232 243 241;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--ctbu-page);
+  color: var(--ctbu-strong);
+}
+
+/*
+ * 主题切换的衔接效果（2026-10-22）
+ * ---------------------------------------------------------------
+ * 用户要求：「时间很短，但必须存在的衔接效果」。
+ *
+ * 做法：切换时给 <html> 挂一个 `theme-switching` 类，持续 220ms，
+ * 期间让颜色属性走 transition。**平时不加**这个类 ——
+ * 全站常驻 `transition: background-color` 会让打开图片、切页、
+ * hover 全部拖上 200ms 的延迟感（尤其 iPad 上翻卷子会显得卡）。
+ *
+ * 为什么是 220ms：低于 150ms 感觉不到过渡（像闪一下），
+ * 高于 300ms 会挡操作。220ms 正好是"看得见它变了、但不觉得在等"。
+ *
+ * 只给颜色类属性加过渡，不碰 transform/opacity —— 那两个有自己的动画，
+ * 混进来会让切页动画变糊。
+ */
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition:
+    background-color 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    fill 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* 系统开了「减弱动态效果」：不要过渡，直接换 */
+@media (prefers-reduced-motion: reduce) {
+  html.theme-switching,
+  html.theme-switching *,
+  html.theme-switching *::before,
+  html.theme-switching *::after {
+    transition: none !important;
+  }
+}
+
+/*
+ * 白色 PNG 在浅色底上会看不见 —— 给它反相
+ * ---------------------------------------------------------------
+ * `/logo-signature.png` 与开屏签名都是**白色笔画**的透明 PNG
+ * （深色底上才成立的素材）。浅色模式下直接反相，不用重新出一套图。
+ * 用 `filter: invert(1)` 而不是再做一张图，是为了保证以后换 logo 只改一处。
+ */
+[data-theme='light'] img[src*='logo-signature'],
+[data-theme='light'] img[src*='splash-write'] {
+  filter: invert(1);
+}
+
+/*
+ * 颜色兜底：`<html>` 自己也要跟着变，否则 iOS 上拉到底时的
+ * 橡皮筋区域、以及地址栏附近的底色会停在旧主题上（一条明显的色带）。
+ */
+html {
+  background: var(--ctbu-page);
+}
+
+/*
+ * ══════════════════════════════════════════════════════════════
+ * 修复 iOS「登录后整个页面被放大」
+ * ══════════════════════════════════════════════════════════════
+ *
+ * 现象：iPhone 上点输入框、登录完成之后，整页 UI 明显变大且不恢复。
+ *
+ * 原因：iOS Safari 的硬性行为 —— 当聚焦的表单元素 font-size < 16px 时，
+ * 会自动把页面临时放大（让用户看清输入内容）。本项目输入框原本是
+ * text-sm = 14px，一聚焦就触发；登录流程正好要点邮箱和密码两个框，
+ * 于是"登录后就变大了"。
+ *
+ * 修法：把表单控件的字号锁在 16px。文字看起来会比原来略大一点，
+ * 但这是唯一能彻底关掉自动缩放的方式（其他做法如 maximum-scale
+ * 会破坏无障碍，iOS 10 起也被忽略）。
+ */
+form input,
+form textarea,
+form select,
+textarea,
+input[type='text'],
+input[type='email'],
+input[type='password'],
+input[type='number'],
+input[type='tel'],
+input[type='search'],
+input[type='url'] {
+  font-size: 16px;
+}
+
+/* 16px 会撑高输入框，用 line-height 收回来，视觉高度不变 */
+input,
+textarea {
+  line-height: 1.35;
+}
+
+/* 手机号/验证码这类短输入保持视觉协调 */
+@media (max-width: 640px) {
+  form input,
+  textarea,
+  input[type='text'],
+  input[type='email'],
+  input[type='password'],
+  input[type='number'],
+  input[type='tel'],
+  input[type='search'],
+  input[type='url'] {
+    font-size: 16px;
+  }
+}
+
+/* 列表错峰入场：给每个元素加 .stagger，再用内联 animation-delay 控制节奏 */
+.stagger > * {
+  animation: fade-in-up 0.38s cubic-bezier(0.22, 0.9, 0.32, 1) both;
+}
+
+/*
+ * 悬停只换底色与发丝线，**不再整卡上浮**。
+ * 原来 `.lift:hover { translateY(-2px) }` 让每张卡都会动 —— 动效撒在所有东西上，
+ * 就等于没有主次（design-system：动效只留给真正的主动作）。
+ */
+.lift {
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+/*
+ * 档案馆的"索引行"：行与行之间一条发丝线，不画盒子。
+ * 这是替代「一堆同尺寸白卡」的主要手段 —— 用分隔线做分组，
+ * 比给每块加圆角描边省一层视觉噪音。
+ */
+.rule-list > * + * {
+  border-top: 1px solid var(--ctbu-rule);
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Custom scrollbar —— 改成与墨阶同色，原来用的 slate 是另一套冷灰 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3a3d40;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9c988c;
+}
+
+/* 键盘焦点必须看得见（消除 outline 后一定要补回来，否则键盘用户迷路） */
+:focus-visible {
+  outline: 2px solid #0f766e;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ============================================================
+   AI 学习助手面板动画（2026-10-25）
+   只用 transform/opacity（GPU 合成，手机上不掉帧）；
+   移动端从底部滑入、桌面端从右侧滑入；关闭时反向退出。
+   尊重系统「减弱动态效果」设置。
+   ============================================================ */
+@keyframes ai-in-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0);  opacity: 1; }
+}
+@keyframes ai-in-right {
+  from { transform: translateX(32px); opacity: 0; }
+  to   { transform: translateX(0);   opacity: 1; }
+}
+@keyframes ai-out-down {
+  to { transform: translateY(24px); opacity: 0; }
+}
+@keyframes ai-out-right {
+  to { transform: translateX(32px); opacity: 0; }
+}
+@keyframes ai-fade {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ai-panel {
+  animation: ai-in-up 0.24s cubic-bezier(0.2, 0.8, 0.3, 1);
+  will-change: transform, opacity;
+}
+.ai-panel.ai-closing {
+  animation: ai-out-down 0.18s ease-in forwards;
+}
+@media (min-width: 768px) {
+  .ai-panel { animation-name: ai-in-right; }
+  .ai-panel.ai-closing { animation-name: ai-out-right; }
+}
+.ai-bubble { animation: ai-fade 0.18s ease-out; }
+.ai-btn { animation: ai-fade 0.22s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .ai-panel, .ai-panel.ai-closing, .ai-bubble, .ai-btn { animation: none !important; }
+}
+
+/* 面板高度/安全区：dvh 渐进增强（不支持 dvh 的旧浏览器自动退回 vh），
+   微信内置浏览器、iOS Safari 键盘弹出时面板随视口收缩，比例保持正常 */
+.ai-h-sheet { height: 68vh; height: 68dvh; }
+@media (min-width: 768px) {
+  .ai-h-sheet { height: auto; max-height: calc(100vh - 110px); max-height: calc(100dvh - 110px); }
+}
+.ai-safe { padding-bottom: 0.75rem; }
+@supports (padding: env(safe-area-inset-bottom)) {
+  .ai-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 0.75rem); }
+}

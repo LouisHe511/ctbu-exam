@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+  <!--
+    ═══════════════════════════════════════════════════════════════
+    主题预置（2026-10-22）
+    ═══════════════════════════════════════════════════════════════
+    必须在 <head> 最前面同步执行：React 要等 200KB JS 才挂载，
+    那时页面早画出来了。如果等到 React 再设 data-theme，
+    浅色用户每次打开都会先看到**一帧全黑**再跳成浅色 —— 闪得很难看。
+
+    这里只做一件事：读 localStorage 覆盖 <html data-theme>。
+    不涉及网络、不涉及鉴权，解析到就执行，成本约 0。
+  -->
+  <script>
+    /*
+      ═══════════════════════════════════════════════════════════
+      主题预置（2026-10-22，与 src/context/ThemeContext.tsx 同一套规则）
+      ═══════════════════════════════════════════════════════════
+      必须在 <head> 最前面同步执行：React 要等 200KB JS 才挂载，
+      那时页面早画出来了。等 React 再设 data-theme 的话，
+      浅色用户每次打开都会先看到**一帧全黑**再跳成浅色。
+
+      规则：
+        · 08:00–19:00 → 浅色；其余时间 → 深色
+        · 用户手动选过 → 用他的选择，但只到"下一个时间界"为止
+        · 开屏动画跟着同一套走（浅色开屏 + 签名反相，见下面 CSS）
+
+      ⚠️ 改这里的常量时，**必须同步** ThemeContext.tsx 里的
+         DAY_START_HOUR / DAY_END_HOUR / nextBoundary()。
+    */
+    (function () {
+      var DAY_START = 8, DAY_END = 19;
+      var KEY = 'ctbu:theme';
+
+      function autoTheme(d) {
+        var h = d.getHours();
+        return (h >= DAY_START && h < DAY_END) ? 'light' : 'dark';
+      }
+      function nextBoundary(from) {
+        var d = new Date(from);
+        var h = d.getHours();
+        function at(hh, off) {
+          var t = new Date(d);
+          t.setDate(t.getDate() + off);
+          t.setHours(hh, 0, 0, 0);
+          return t;
+        }
+        if (h < DAY_START) return at(DAY_START, 0);
+        if (h < DAY_END) return at(DAY_END, 0);
+        return at(DAY_START, 1);
+      }
+
+      /*
+       * ═══════════════════════════════════════════════════════════
+       * 优先级（2026-10-22 用户要求：跟着设备走）
+       * ═══════════════════════════════════════════════════════════
+       *   ① 用户手动选过 → 用它（只到下一个时间界为止）
+       *   ② 设备/系统的深浅偏好（prefers-color-scheme）
+       *   ③ 都没有 → 按时间（08:00–19:00 浅色）
+       *
+       * ② 来自系统设置，几乎所有现代浏览器都支持
+       * （iOS 13+/Android 10+/Chrome 76+/Safari 12.1+）。
+       * 手机开了「深色模式」，本站就跟着深色，与几点无关 ——
+       * 这比"几点钟"更贴近用户当下的真实意图（比如深夜开着台灯但手机仍是浅色）。
+       * ③ 只在 matchMedia 不可用的老环境里兜底。
+       */
+      var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+      var deviceTheme = mq ? (mq.matches ? 'dark' : 'light') : null;
+      var theme = deviceTheme || autoTheme(new Date());
+
+      try {
+        var raw = localStorage.getItem(KEY);
+        if (raw) {
+          // 新版存 {theme, until}；上一版直接存 'light'/'dark'，兼容一下
+          if (raw === 'light' || raw === 'dark') {
+            theme = raw;
+          } else {
+            var p = JSON.parse(raw);
+            if ((p.theme === 'light' || p.theme === 'dark') && Number(p.until) > Date.now()) {
+              theme = p.theme;
+            }
+          }
+        }
+      } catch (e) { /* 隐私模式：按设备/时间自动 */ }
+
+      document.documentElement.setAttribute('data-theme', theme);
+      if (/[?&]light=1/.test(location.search)) {
+        document.documentElement.setAttribute('data-splash-light', '1');
+      }
+      // 浏览器 UI（iOS 地址栏 / Android 状态栏）也要跟着变
+      var m = document.createElement('meta');
+      m.name = 'theme-color';
+      m.content = theme === 'light' ? '#fbfbfa' : '#08090a';
+      document.head.appendChild(m);
+    })();
+  </script>
+
+    <!--
+      ═══════════════════════════════════════════════════════════════
+      首屏数字预取（2026-10-21）
+      ═══════════════════════════════════════════════════════════════
+      用户要求：「直接读取有多少份真题，省去这个流程，放在加载网站的阶段里。
+
+      React 的流程是：下载 JS → 挂载 → 发请求 → 等响应 → 渲染数字。
+      网络慢时首页会先显示 0，一两秒后才跳到 104。
+
+      这里把「拿数字」提前到 <head>：
+        · 浏览器解析到这里就发请求（早于 CSS、早于 React bundle）
+        · 响应到达后写进 window.__CTBU_TOTALS__，React 挂载时同步读走
+        · 同时写 localStorage，下次打开连请求都不用等
+      接口顶层就带 total_papers / total_with_answer，这些数字不需要等列表下完。
+    -->
+    <script>
+      (function () {
+        var KEY = 'ctbu_library_totals_v1';
+        var w = window;
+        // 先用手上有的（上次缓存），保证同步可用
+        try {
+          var raw = localStorage.getItem(KEY);
+          if (raw) {
+            var v = JSON.parse(raw);
+            if (v && v.papers > 0) w.__CTBU_TOTALS__ = { papers: v.papers, withAnswer: v.withAnswer || 0, courses: v.courses || 0, source: 'cache' };
+          }
+        } catch (e) {}
+
+        // 再异步校正（不阻塞任何东西）
+        try {
+          fetch('/api/data/papers', { credentials: 'omit' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              if (!d || !d.ok) return;
+              var papers = d.total_papers || (d.papers ? d.papers.length : 0);
+              var withAnswer = d.total_with_answer || 0;
+              if (papers > 0) {
+                var next = { papers: papers, withAnswer: withAnswer, courses: 0, source: 'network' };
+                w.__CTBU_TOTALS__ = next;
+                try { localStorage.setItem(KEY, JSON.stringify(next)); } catch (e) {}
+                // 通知已挂载的 React 立即更新（首次挂载前到达则不需要）
+                w.dispatchEvent(new CustomEvent('ctbu:totals', { detail: next }));
+              }
+            })
+            .catch(function () { /* 离线/被墙：保留缓存值，不写 0 */ });
+        } catch (e) {}
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <!--
+      站点图标（2026-10-27 换）
+      原来用 /logo.png —— 那是 262×64 的**横版**图（重庆工商大学校徽+校名），
+      浏览器把它塞进 16×16 正方形后被压成竖条纹，正是用户反馈的"太丑"。
+      另外它是**学校官方标识**，而本站页脚明确写着"与任何学校、机构无隶属关系"，
+      用在自家图标上既不一致也有侵权风险。
+      现改用 /favicon.png：深色圆角方块 + 本站自己的 Louis 手写签名，512×512。
+    -->
+    <link rel="icon" type="image/png" sizes="48x48" href="/favicon.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>工商真题库 - 历年考试真题与学习资料整理</title>
+    <meta
+      name="description"
+      content="工商真题库：历年考试真题与学习资料的整理与分享。个人整理的复习资料，仅供学习参考。"
+    />
+
+    <!-- 分享预览（微信 / QQ / 群聊里发链接时显示标题与缩略图） -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="工商真题库" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:title" content="工商真题库 - 历年考试真题与学习资料整理" />
+    <meta
+      property="og:description"
+      content="历年考试真题与学习资料的整理与分享，个人整理，仅供学习参考。"
+    />
+    <meta property="og:url" content="https://louisnb.cn/" />
+    <meta property="og:image" content="https://louisnb.cn/og-share.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="工商真题库 - 历年考试真题与学习资料整理" />
+    <meta
+      name="twitter:description"
+      content="历年考试真题与学习资料的整理与分享，个人整理，仅供学习参考。"
+    />
+    <meta name="twitter:image" content="https://louisnb.cn/og-share.png" />
+  </head>
+  <body>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         开屏动画（2026-10-21）
+         ═══════════════════════════════════════════════════════════════
+         时序：
+           0.08s  签名从左往右「写」出来（clip-path 擦除 + blur 归零）
+           0.72s  「工商真题库」五个字**逐字**浮现（每个隔 70ms）
+           1.30s  签名 + 字一起飞向左上角，精确落到导航栏 logo 的位置
+           1.95s  遮罩淡出，底下的真实网站露出来
+
+         为什么归位用 Web Animations API 而不是 CSS @keyframes：
+           CSS keyframes 里的 transform 如果引用 CSS 变量，
+           Chrome 有时会在动画开始那一刻就把变量值"冻结"成空值，
+           结果只缩小、不位移（实测踩到，logo 停在原地缩成一小团）。
+           用 el.animate() 在运行时把算好的 px 值直接传进去，没有解析时机问题。
+
+         为什么整块写在 HTML 里：
+           React 要等 205KB JS 下载完才挂载，那时网站早画好了，
+           开屏会变成"拖延"。放在 <body> 开头，解析到就画。
+
+         播放时机（2026-10-22）：**每次整页打开、且落在首页**才播。
+         从真题/四六级等深链进来不播；站内切页（hash 变化）也不会重播。
+         地址后加 ?splash=1 强制播；?splash=0 强制跳过。
+         ═══════════════════════════════════════════════════════════════ -->
+    <style>
+      #ctbu-splash {
+        position: fixed; inset: 0; z-index: 9999;
+        /*
+          底色跟主题走（2026-10-22）。
+          ⚠️ 这里**不能**用 `var(--ctbu-page)` —— 那是 index.css 里的变量，
+          而 index.css 要等 React bundle 才开始加载；开屏是 <body> 第一帧，
+          那时变量还没定义，会拿到空值 → 白闪。
+          所以直接用属性选择器写死两个值。
+        */
+        background: #08090a;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+      }
+      #ctbu-splash[hidden] { display: none; }
+
+      /* 签名：初始被裁掉，由 JS 播放"写出"动画 */
+      /* 签名容器：揭示交给 SVG mask，这里只管尺寸和归位动画 */
+      #ctbu-splash-logo {
+        display: block;
+        flex: none;
+        transform-origin: center center;
+        will-change: transform, opacity;
+      }
+      /*
+       * 浅色模式下**取消 will-change**（2026-10-22）。
+       * will-change: transform 会强制这个 div 成为一个独立合成层；
+       * 里面那张 APNG 又自带合成层 —— 两层叠在一起时，iOS Safari / 微信内核
+       * 有一类老 bug：外层滤镜不会作用到内层的动画图片上，结果签名保持白色。
+       * 浅色模式下把 will-change 摘掉，让它们待在同一个合成层里，滤镜就生效了。
+       */
+      [data-theme='light'] #ctbu-splash-logo,
+      html[data-splash-light='1'] #ctbu-splash-logo {
+        will-change: auto;
+      }
+
+      /* 五个字：每个单独 span，逐字浮现 */
+      #ctbu-splash-name {
+        display: flex;
+        margin-top: 22px;
+        font: 500 11px/1 "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+        letter-spacing: 0.3em;
+        color: rgba(255, 255, 255, 0.5);
+        white-space: nowrap;
+      }
+      /* 补掉最后一个字右字距造成的视觉偏移，让它真正居中 */
+      #ctbu-splash-name { padding-left: 0.3em; }
+      #ctbu-splash-name span {
+        display: inline-block;
+        opacity: 0;
+        filter: blur(3px);
+        transform: translateY(5px);
+        will-change: opacity, filter, transform;
+      }
+
+      /* 浅色主题下：黑底改纸白，白签名反相成深色，保证看得清 */
+      /* ══════════════════════════════════════════════════════════
+         浅色模式的开屏（2026-10-22 最终版）
+         ══════════════════════════════════════════════════════════
+         需要改两样东西，缺一个都会"看不见"：
+           ① 背景：#08090a → #fbfbfa
+           ② **签名换成黑色笔画的另一张 APNG**（不是滤镜）
+
+         为什么不用 CSS filter 把白图反相成黑：
+           试过两次（滤镜加外层 div、加 <img> 自己）都不可靠 ——
+           动画 PNG 有独立合成层，iOS Safari / 微信内核里滤镜有概率
+           不作用于动画帧，结果白签名原样贴在纸白底上，等于隐形。
+           换图是唯一在所有浏览器都稳的做法。
+         ══════════════════════════════════════════════════════════ */
+      [data-theme='light'] #ctbu-splash,
+      html[data-splash-light='1'] #ctbu-splash {
+        background: #fbfbfa;
+      }
+      /*
+       * 签名本身**不用滤镜**：浅色模式直接换一张黑色笔画的 APNG
+       * （public/splash-write-dark.png，77 帧同源反相，帧时长/循环一致）。
+       * 原因：动画 PNG 有自己的合成层，iOS Safari / 微信内核里外层滤镜
+       * 有概率不作用于动画帧 —— 两次尝试都失败，换图是唯一在所有浏览器都稳的。
+       *
+       * ⚠️ 重编码 APNG 必须用 disposal=1 + blend=0 + 每帧完整画面，
+       *    否则末帧会丢内容（踩过：末帧只剩 337 个不透明像素，字写一半就没了）。
+       */
+      /* 「工商真题库」五个字是纯文本，没有合成层问题，反相即可（50% 白 → 50% 黑） */
+      [data-theme='light'] #ctbu-splash-name,
+      html[data-splash-light='1'] #ctbu-splash-name {
+        -webkit-filter: invert(1);
+        filter: invert(1);
+      }
+
+      /*
+       * ⚠️ 2026-10-22 修「浅色开屏先完整闪一下签名，再消失，再开始写」。
+       *
+       * 原因：黑签名是**静态图**，`<img>` 一加载完就整张可见；
+       * 而裁切（clip-path）是等 startWrite() 才加上去的 ——
+       * 中间那 200ms~500ms 就是"完整签名先出现一下"。
+       *
+       * 修法：把「初始裁掉」写进 CSS，让它**从第一帧起就是藏着的**，
+       * JS 只负责把它擦开。这样首帧和动画首帧完全一致，不会闪现。
+       */
+      [data-theme='light'] #ctbu-splash-svg,
+      html[data-splash-light='1'] #ctbu-splash-svg {
+        -webkit-clip-path: inset(0 100% 0 0);
+        clip-path: inset(0 100% 0 0);
+      }
+
+      /*
+       * 无障碍：系统开了「减弱动态效果」→ 不做书写/飞行动画，只淡入。
+       *
+       * ⚠️ 这里**不能写 `filter: none`** —— 那样会把上面浅色模式的
+       *    invert(1) 一起清掉，浅色用户看到的就是"白签名贴白底"，
+       *    等于开屏一片空白。（第一版就是踩了这个，2026-10-22 修）
+       *    只清掉 blur 相关的，反相保留。
+       */
+      @media (prefers-reduced-motion: reduce) {
+        /* 只清 blur 相关的，**不能**写 filter:none —— 那会把浅色模式的反相一起清掉 */
+        #ctbu-splash-logo { clip-path: none; }
+        #ctbu-splash-name span { filter: none; -webkit-filter: none; transform: none; }
+      }
+    </style>
+
+    <div id="ctbu-splash" hidden>
+      <div id="ctbu-splash-logo">
+<!-- 不写死 src：下面的脚本会按当前主题选白色或黑色那份（早于任何绘制） -->
+        <img id="ctbu-splash-svg" alt="" aria-hidden="true"
+             style="display:block;width:280px;height:130px;flex:none" />
+      </div>
+      <script>
+        /*
+         * 立刻按主题选图（解析到这里就执行，早于这张图被绘制）。
+         * 不这么做的话：先按写死的白图下载/绘制 → JS 再换成黑图，
+         * 浅色模式下会多一次无谓的 79KB 下载，还可能闪一下。
+         */
+        (function () {
+          var root = document.documentElement;
+          var light = root.getAttribute('data-theme') === 'light'
+            || root.getAttribute('data-splash-light') === '1';
+          document.getElementById('ctbu-splash-svg').src =
+            light ? '/splash-dark.png' : '/splash-write.png';
+        })();
+      </script>
+      <div id="ctbu-splash-name" aria-label="工商真题库">
+        <span>工</span><span>商</span><span>真</span><span>题</span><span>库</span>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var splash = document.getElementById('ctbu-splash');
+        if (!splash) return;
+
+        /**
+         * ═══════════════════════════════════════════════════════
+         * 播放策略（2026-10-22 定稿）
+         * ═══════════════════════════════════════════════════════
+         * 规则：**每次整页打开 + 落在首页** 才播。
+         *
+         *   https://louisnb.cn/                 → 播
+         *   https://louisnb.cn/#/               → 播
+         *   https://louisnb.cn/#/paper/xxx      → 不播（深链直接看卷子）
+         *   https://louisnb.cn/#/library        → 不播
+         *   从真题库点「首页」回到 `#/`           → 不播（那不是整页加载，
+         *                                          只是 hash 变化，本脚本根本不会重跑）
+         *
+         * 为什么要按 hash 判断：
+         *   开屏是写在 index.html 里的内联脚本，**只在整页加载时执行一次**。
+         *   站内的页面切换走的是 hash（`#/library` → `#/`），不会重新解析 HTML，
+         *   所以「从其他页面回到主页也没动画」是天然成立的，不需要额外处理。
+         *   反过来，从微信里点开一份试卷的分享链接会整页加载 ——
+         *   那时 hash 是 `#/paper/…`，就应当跳过，否则用户等了 2 秒才看到卷子。
+         *
+         * 演进史（别再改回去）：
+         *   ① 永久只播一次 → 老用户第二次来再也见不到
+         *   ② 每次都播      → 用户反馈「每次刷新都跳动画」，太烦
+         *   ③ 每天一次      → 刷新不播了，但从真题页进来仍会播（浪费 2 秒）
+         *   ④ 现在：每次打开 + 仅首页
+         *
+         * 两个手动出口（调试用）：
+         *   ?splash=1  → 强制播（任何页面都播，方便验收）
+         *   ?splash=0  → 强制跳过
+         *
+         * ⚠️ 不涉及任何鉴权：只读一次 location.hash，解析到就判断，成本约 0。
+         */
+        var force = /[?&]splash=1/.test(location.search);
+        var skip = /[?&]splash=0/.test(location.search);
+
+        function dropSplash() {
+          if (splash.parentNode) splash.parentNode.removeChild(splash);
+        }
+
+        if (skip) { dropSplash(); return; }
+
+        /**
+         * 是不是首页。
+         * 空串 = 刚打开还没有 hash（等价于首页）；`#/` 是首页的规范写法。
+         * 也接受 `#/home`，虽然项目里目前不产生它，但多认一个不会错。
+         */
+        var h = location.hash || '';
+        var isHome = h === '' || h === '#/' || h === '#/home';
+
+        // 非首页的深链：直接丢掉开屏，别让用户多等
+        if (!isHome && !force) { dropSplash(); return; }
+
+        splash.hidden = false;
+
+        var logo = document.getElementById('ctbu-splash-logo');
+        var name = document.getElementById('ctbu-splash-name');
+        var chars = name.querySelectorAll('span');
+        var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        var EASE_OUT = 'cubic-bezier(0.22, 0.9, 0.32, 1)';
+        var EASE_FLY = 'cubic-bezier(0.76, 0, 0.24, 1)';
+
+        /**
+         * ══════════════════════════════════════════════════════════
+         * 签名「逐笔书写」：APNG（动画 PNG）
+         * ══════════════════════════════════════════════════════════
+         *
+         * 为什么从 SVG mask 换成 APNG：
+         *
+         *   原来用 <mask> + stroke-dashoffset 在浏览器里实时算遮罩。
+         *   这在 Chrome 上没问题，但 iOS Safari 和微信内置浏览器
+         *   （都是 WebKit）会算错 —— 笔画碎成一块块散在整条路径上。
+         *
+         *   试过的补救（删 pathLength、显式 maskUnits、运行时
+         *   getTotalLength 校正 dasharray）都只能靠猜，
+         *   而且没法在每台 iPhone 上验证。
+         *
+         *   APNG 是**预先渲染好的像素**：35 帧、41KB，
+         *   浏览器只负责按帧显示图片，不参与任何矢量计算。
+         *   所有浏览器（含 iOS Safari 2014 年起、微信）表现完全一致，
+         *   不存在「某个引擎算错」的可能。
+         *
+         *   兜底：万一某个环境不支持 APNG 动画，它会退化成
+         *   显示第一帧（一小段笔画）—— 但那也只是「没动画」，
+         *   绝不会出现碎片。
+         *
+         * 动画内含：
+         *   · 35 帧 / 30fps / 1.2 秒书写
+         *   · o 起笔处 1.8 倍加速（110ms 窗口）
+         *   · loop=1，末帧停留 3 秒后自然结束
+         * ─────────────────────────────────────────────────────────
+         */
+        var writeImg = splash.querySelector('#ctbu-splash-svg');
+        var WRITE_TOTAL = 1480;      // APNG 实际播放时长（略留余量）
+
+        /**
+         * ══════════════════════════════════════════════════════════
+         * 浅色模式：静态黑签名 + clip-path 揭示（2026-10-22 定稿）
+         * ══════════════════════════════════════════════════════════
+         * 走过的三条路，前两条都不成：
+         *   ① CSS `filter: invert(1)` 打在 APNG 上 —— 动画图片有独立合成层，
+         *      iOS Safari / 微信内核里滤镜有概率不作用于动画帧，
+         *      白签名原样贴纸白底 = 看不见（用户两次反馈"还是白色"）
+         *   ② 用 PIL 逐帧反相重新编码一份黑色 APNG —— 能正常播放，
+         *      但 APNG 的帧合成要求每帧都是完整画面（disposal=1 + blend=0），
+         *      体积从 79KB 涨到 1.1MB；用 disposal=2 压回去又会丢内容
+         *      （末帧只剩 337 个不透明像素，字写一半就没了）
+         *
+         *   ✓ 现在：浅色模式干脆用**静态的黑色签名 PNG**（29KB），
+         *     再用 `clip-path: inset()` 从左往右擦出来 —— 视觉上仍然是
+         *     "一笔一笔写出来"，但完全没有动画图片 + 滤镜的兼容问题。
+         *
+         * 代价：浅色下签名不能像深色那样"笔画逐段出现"，而是整体从左到右
+         * 揭示。差别很小，换来的是**所有浏览器都一定看得见**。
+         */
+        var wantLight =
+          document.documentElement.getAttribute('data-theme') === 'light' ||
+          document.documentElement.getAttribute('data-splash-light') === '1';
+
+        // 图片已经在 <img> 后面那段内联脚本里按主题设好了，这里只做幂等兜底
+        if (wantLight && !/splash-dark\.png/.test(writeImg.getAttribute('src') || '')) {
+          writeImg.src = '/splash-dark.png';
+        }
+
+
+
+        /**
+         * 开播前：等 APNG 解码完 + 静置 200ms。
+         *
+         * 必须等 decode()，否则会出现「动画在空白上放完了」。
+         */
+        var HOLD_MS = 200;
+        var started = false;
+
+        function startWrite() {
+          if (reduce) {
+            /*
+             * ⚠️ 浅色下 img 的初始裁切是写在 CSS 里的（防止首帧闪现）。
+             * reduce 模式不放书写动画，所以必须**手动解除裁切**，
+             * 否则这个签名会永远被裁成 0 宽 —— 看起来就是开屏一片空白。
+             */
+            writeImg.style.clipPath = 'none';
+            writeImg.style.webkitClipPath = 'none';
+            logo.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 250, fill: 'forwards', easing: 'ease-out' });
+            return;
+          }
+          if (wantLight) {
+            /*
+             * 浅色：静态黑签名从左往右"擦"出来。
+             * `inset(0 100% 0 0)` → `inset(0 0 0 0)` 是 clip-path 里
+             * 兼容性最好的写法（Chrome/Safari/Firefox 都支持，不需要前缀）。
+             * 时长对齐深色那份 APNG 的书写长度（约 1.25s）。
+             */
+            writeImg.style.clipPath = 'inset(0 100% 0 0)';
+            writeImg.style.webkitClipPath = 'inset(0 100% 0 0)';
+            writeImg.animate(
+              [
+                { clipPath: 'inset(0 100% 0 0)', webkitClipPath: 'inset(0 100% 0 0)' },
+                { clipPath: 'inset(0 0 0 0)', webkitClipPath: 'inset(0 0 0 0)' },
+              ],
+              { duration: 1250, fill: 'forwards', easing: 'cubic-bezier(0.4, 0, 0.3, 1)' }
+            );
+            return;
+          }
+          // 深色：APNG 由浏览器自动播放，这里只需要确保它在页面上
+          writeImg.style.opacity = '1';
+        }
+
+        function begin() {
+          if (started) return;
+          started = true;
+          setTimeout(startWrite, HOLD_MS);
+        }
+
+        var probe = new Image();
+        probe.src = wantLight ? '/splash-dark.png' : '/splash-write.png';
+        var fallback = setTimeout(begin, 2500);
+        function ready() { clearTimeout(fallback); begin(); }
+
+        if (probe.decode) {
+          probe.decode().then(ready).catch(ready);
+        } else if (probe.complete) {
+          ready();
+        } else {
+          probe.onload = ready;
+          probe.onerror = ready;
+        }
+
+        // ── 2) 五个字逐字浮现 ──
+        // 每个字：模糊 → 清晰、微微上浮。间隔 70ms，像字一个一个印上去。
+        chars.forEach(function (ch, i) {
+          ch.animate(
+            reduce
+              ? [{ opacity: 0 }, { opacity: 1 }]
+              : [
+                  { opacity: 0, filter: 'blur(3px)', transform: 'translateY(5px)' },
+                  { opacity: 1, filter: 'blur(0)', transform: 'translateY(0)' },
+                ],
+            { duration: reduce ? 200 : 340, delay: 1400 + i * 58, fill: 'forwards', easing: EASE_OUT }
+          );
+        });
+
+
+        // ── 2) 五个字逐字浮现 ──
+        // 每个字：模糊 → 清晰、微微上浮。像字一个一个印上去。
+        function onWritten() {
+          chars.forEach(function (ch, i) {
+            ch.animate(
+              reduce
+                ? [{ opacity: 0 }, { opacity: 1 }]
+                : [
+                    { opacity: 0, filter: 'blur(3px)', transform: 'translateY(5px)' },
+                    { opacity: 1, filter: 'blur(0)', transform: 'translateY(0)' },
+                  ],
+              { duration: reduce ? 200 : 340, delay: i * 58, fill: 'forwards', easing: EASE_OUT }
+            );
+          });
+          setTimeout(fly, reduce ? 300 : 340 + 4 * 58 + 90);
+        }
+
+        // 书写结束 → 文字浮现
+        setTimeout(onWritten, HOLD_MS + WRITE_TOTAL);
+
+        // ── 3) 一起归位到导航栏 logo 的位置 ──
+        var flown = false;
+        function fly() {
+          if (flown) return;
+          flown = true;
+          var real = document.querySelector('header img[alt="Louis"]');
+          if (!real) return finish();
+
+          var a = logo.getBoundingClientRect();
+          var b = real.getBoundingClientRect();
+          if (!a.width || !b.width) return finish();
+
+          var dx = (b.left + b.width / 2) - (a.left + a.width / 2);
+          var dy = (b.top + b.height / 2) - (a.top + a.height / 2);
+          var sc = b.width / a.width;
+
+          var opts = { duration: 620, fill: 'forwards', easing: EASE_FLY, iterations: 1 };
+          logo.animate(
+            [
+              { transform: 'translate(0,0) scale(1)' },
+              { transform: 'translate(' + dx + 'px,' + dy + 'px) scale(' + sc + ')' },
+            ],
+            opts
+          );
+          // 文字同时淡出（它不存在于导航栏 logo 里，所以是"并入"而非"跟随"）
+          name.animate(
+            [{ opacity: 1, transform: 'translate(0,0)' }, { opacity: 0, transform: 'translate(0,-8px)' }],
+            { duration: 300, delay: 60, fill: 'forwards', easing: 'ease-in' }
+          );
+          setTimeout(finish, 700);
+        }
+
+        // ── 4) 遮罩淡出并移除 ──
+        var finished = false;
+        function finish() {
+          if (finished) return;
+          finished = true;
+          splash.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 280, fill: 'forwards', easing: 'ease-out' })
+            .finished.then(function () { if (splash.parentNode) splash.remove(); });
+        }
+
+        /**
+         * ⚠️ 这里原来还有一个 setTimeout(fly, 2050) —— 删掉了。
+         *
+         * 它和 onWritten 里那条（书写结束 → 文字 → fly）是两条独立的时间线，
+         * 两条都会调 fly()，于是签名被"送到导航栏"两次：
+         *   第一次飞到位，第二次又从中心飞一遍 → 看到重复动画。
+         *
+         * 现在只有一条链路：
+         *   图片 decode → 静置200ms → APNG 播放 → onWritten → 文字浮现 → fly → finish
+         */
+        var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+
+        // 兜底：4 秒后无论发生什么都要移除，绝不卡住用户
+        setTimeout(function () { if (splash.parentNode) splash.remove(); }, 4400);
+      })();
+    </script>
+
+  <!--
+    ═══════════════════════════════════════════════════════════════
+    备案号的「静态副本」（2026-10-23）
+    ═══════════════════════════════════════════════════════════════
+    为什么需要：
+      管局审核时会「查看网页源码」核对备案号是否挂在首页底部。
+      而本站是 SPA —— 页脚那个 渝ICP备… 是 React 渲染出来的，
+      **源码里搜不到**。2026-10-23 准备 ICP 主体变更时发现这个风险，
+      提前补上，避免被以「未悬挂备案号」驳回、白等 20 个工作日。
+
+    做法：
+      这里放一份纯静态的备案号（源码可见、不依赖 JS），
+      React 挂载后由 main.tsx 把这份副本移除，所以页面上只会看到一份。
+      即使 JS 挂了，这份也会正常显示 —— 反而是更稳的兜底。
+
+    ⚠️ 以后拿到公安备案号，也加在这个块里，同样写静态的。
+  -->
+  <div id="static-icp" style="position:relative;z-index:1;padding:14px 16px 18px;text-align:center;font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#7a7f88;background:#08090a">
+    <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer noopener" style="color:inherit;text-decoration:none">渝ICP备2026026074号-1</a>
+  </div>
+
+  <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

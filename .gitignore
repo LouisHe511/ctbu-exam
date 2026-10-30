@@ -1,0 +1,56 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-ssr/
+build/
+*.tsbuildinfo
+
+# 环境变量（含本地地址、密钥）
+.env
+.env.*
+!.env.example
+
+# 日志
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 编辑器与系统
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+
+# ------------------------------------------------------------
+# 内容与素材：**不进版本库**
+#
+# 这个项目最容易犯的错误，是把试卷 PDF / 听力音频 / 截图
+# 一起提交上去 —— 一次就把仓库顶到 GB 级，且涉及版权。
+# 下面这些规则是踩过坑之后加的，改动前请想清楚。
+# ------------------------------------------------------------
+*.pdf
+*.mp3
+*.mp4
+*.zip
+*.ttf
+*.otf
+
+# 四六级数据（体积大，且是内容不是代码）
+frontend/public/cet/
+# 按页渲染出来的图片
+frontend/public/pages/
+# 试卷与导入中间产物
+import-ready/
+tools/入库-*/
+_backup*/
+备份/
+outputs/
